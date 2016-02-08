@@ -1,12 +1,9 @@
 require 'active_support'
+require 'table_rotate/errors'
+require 'table_rotate/tasks'
+
 
 module TableRotate
-  class Error < StandardError; end
-  class NotEnoughTimeBetweenArchivesError < Error; end
-  class InvalidTimestampError < Error; end
-  class ArchiveTableAlreadyExistsError < Error; end
-
-
   extend ActiveSupport::Concern
 
 
