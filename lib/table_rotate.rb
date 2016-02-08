@@ -28,22 +28,6 @@ module TableRotate
   end
 
 
-  def self.class_name_from_table_name(table_name)
-    parts = table_name.split('_')
-    formatted_date = parts.pop
-    name = parts.join('_').camelize
-    "#{parts}#{formatted_date}"
-  end
-
-
-  def self.table_name_from_class_name(class_name)
-    parts = s.split /(?=[A-Z])/
-    formatted_date = parts.pop
-    name = parts.join('_')
-    "#{parts}_#{formatted_date}"
-  end
-
-
   def self.timestamp_from_table_name(table_name)
     timestamp = table_name.split('_').last
     if timestamp.match(/\A\d+\z/)
@@ -60,16 +44,16 @@ module TableRotate
 
 
   def self.rotate_active_table!(table_name)
-    now = Time.now
-    formatted_date = now.strftime('%Y%m%d')
-    archived_table_name = "#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_#{formatted_date}"
+    timestamp = Time.now.to_i
+    archived_table_name = "#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_#{timestamp}"
+    tmp_new_table_name = "#{table_name}_tra_new"
 
     if TableRotate.show_tables.include?(archived_table_name)
       raise "#{archived_table_name} already exists. Aborting rotation of #{table_name} table."
     else
       puts 'Archiving active table and replacing with new one...' unless in_test?
-      TableRotate.sql_exec("CREATE TABLE #{table_name}_tra_new like #{table_name}")
-      TableRotate.sql_exec("RENAME TABLE #{table_name} TO #{table_name}_#{ARCHIVE_TABLE_SUFFIX}_#{formatted_date}, #{table_name}_tra_new TO #{table_name}")
+      TableRotate.sql_exec("CREATE TABLE #{tmp_new_table_name} like #{table_name}")
+      TableRotate.sql_exec("RENAME TABLE #{table_name} TO #{archived_table_name}, #{tmp_new_table_name} TO #{table_name}")
       puts 'Done!' unless in_test?
     end
   end
@@ -79,19 +63,24 @@ module TableRotate
   def self.archive_table_names(table_name)
     TableRotate.
       show_tables.
-      select{|t| t.match(/^#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_\d{8}$/)}.
+      select{|t| t.match(/^#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_\d+$/)}.
       sort.reverse
   end
 
 
+  def self.prune_archives(klass)
+  end
+
+
+  # XXX
   def self.clear_archived_table_before!(table_name, date)
     archive_table_names(table_name).each do |t|
       # Dropping tables is dangerous. Bomb if anything doesn't look right.
-      if !t || t == table_name || !t.match(/^#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_\d{8}$/)
+      if !t || t == table_name || !t.match(/^#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_\d+$/)
         raise "Attempted to archive invalid table #{t}!"
       end
 
-      archived_str = t.match(/^#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_(\d{8})$/)[1]
+      archived_str = t.match(/^#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_(\d+)$/)[1]
       archived_at = Date.strptime(archived_str, '%Y%m%d').to_time
       if date == 'endoftime' || archived_at < date
         puts "Dropping table #{t}..." unless in_test?
@@ -115,7 +104,7 @@ module TableRotate
   included do
     def self.archive!
       TableRotate.rotate_active_table!(table_name)
-      TableRotate.clear_archived_table_before!(table_name, archive_table_ttl_in_days.days.ago)
+      # TableRotate.clear_archived_table_before!(table_name, archive_table_ttl_in_days.days.ago)
     end
 
 
@@ -147,13 +136,8 @@ module TableRotate
     #
     # This returns a sub-class that will operate on an archived table for a
     # specific day, e.g. ActiveRecordClassName20141110.
-    def self.archive_class(date)
-      if date.is_a?(String)
-        formatted_date = date
-      else
-        formatted_date = date.strftime('%Y%m%d')
-      end
-      klass_name = "#{name}#{formatted_date}"
+    def self.archive_class(timestamp)
+      klass_name = "#{name}#{timestamp}"
 
       if Object.const_defined?(klass_name)
         konstant = klass_name.constantize
@@ -164,15 +148,15 @@ module TableRotate
         end
       else
         class_eval <<-eos
-          class ::#{name}#{formatted_date} < #{name}
-            self.table_name = '#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_#{formatted_date}'
+          class ::#{name}#{timestamp} < #{name}
+            self.table_name = '#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_#{timestamp}'
           end
         eos
         konstant = klass_name.constantize
       end
 
       unless konstant.table_exists?
-        puts "No archive exists for #{formatted_date}."
+        puts "No archive exists for #{timestamp}."
         return nil
       end
 
