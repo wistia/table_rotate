@@ -40,8 +40,8 @@ module TableRotate
   end
 
 
-  def self.in_test?
-    true
+  def self.verbose?
+    false
   end
 
 
@@ -66,10 +66,10 @@ module TableRotate
     if TableRotate.show_tables.include?(archived_table_name)
       raise ArchiveTableAlreadyExistsError, "#{archived_table_name} already exists. Aborting rotation of #{table_name} table."
     else
-      puts 'Archiving active table and replacing with new one...' unless in_test?
+      puts 'Archiving active table and replacing with new one...' if verbose?
       TableRotate.sql_exec("CREATE TABLE #{tmp_new_table_name} like #{table_name}")
       TableRotate.sql_exec("RENAME TABLE #{table_name} TO #{archived_table_name}, #{tmp_new_table_name} TO #{table_name}")
-      puts 'Done!' unless in_test?
+      puts 'Done!' if verbose?
     end
   end
 
@@ -134,10 +134,8 @@ module TableRotate
     end
 
 
-    def self.with_archives(count = -1)
-      ([self] + archives(count)).map do |klass|
-        yield klass
-      end
+    def self.and_archives(count = nil)
+      [self] + archives(count)
     end
 
 
@@ -193,7 +191,7 @@ module TableRotate
       end
 
       unless konstant.table_exists?
-        puts "No archive exists for #{timestamp}."
+        puts "No archive exists for #{timestamp}." if verbose?
         return nil
       end
 
