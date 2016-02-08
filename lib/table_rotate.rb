@@ -20,11 +20,6 @@ module TableRotate
   end
 
 
-  def self.hi
-    puts 'hello'
-  end
-
-
   def self.show_tables
     ActiveRecord::Base.connection.select_values('show tables')
   end
