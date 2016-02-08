@@ -1,0 +1,26 @@
+development:
+  adapter: mysql2
+  database: table_rotate_dev
+  username: root
+  password:
+  host: 127.0.0.1
+  pool: 1
+  timeout: 5000
+
+test:
+  adapter: mysql2
+  database: table_rotate_test
+  username: root
+  password:
+  host: 127.0.0.1
+  pool: 1
+  timeout: 5000
+
+production:
+  adapter: mysql2
+  database: table_rotate_dev
+  username: root
+  password:
+  host: 127.0.0.1
+  pool: 1
+  timeout: 5000
