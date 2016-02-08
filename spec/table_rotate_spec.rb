@@ -36,5 +36,38 @@ describe TableRotate do
         expect(TestModel.count).to eq 2
       end
     end
+
+
+    describe 'when we have reached max_archive_count' do
+      before do
+        allow(TestModel).to receive(:max_archive_count).and_return(2)
+        allow(TestModel).to receive(:min_time_between_archives).and_return(1)
+      end
+
+      describe 'when archive! is called again' do
+        it 'drops the oldest table' do
+          expect(TestModel.archives.count).to eq 0
+
+          TestModel.archive!
+          expect(TestModel.archives.count).to eq 1
+          sleep 1
+
+          TestModel.archive!
+          expect(TestModel.archives.count).to eq 2
+          sleep 1
+
+          TestModel.archive!
+          expect(TestModel.archives.count).to eq 2
+        end
+      end
+    end
+
+
+    describe 'when archive is called before min_time_between_archives has elapsed' do
+      it 'raises an exception' do
+        TestModel.archive!
+        expect{ TestModel.archive! }.to raise_error(TableRotate::NotEnoughTimeBetweenArchivesError)
+      end
+    end
   end
 end

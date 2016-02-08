@@ -1,11 +1,18 @@
 require 'active_support'
 
 module TableRotate
+  class Error < StandardError; end
+  class NotEnoughTimeBetweenArchivesError < Error; end
+  class InvalidTimestampError < Error; end
+  class ArchiveTableAlreadyExistsError < Error; end
+
+
   extend ActiveSupport::Concern
 
 
   # tra = table rotate archive
   ARCHIVE_TABLE_SUFFIX = 'tra'
+  ARCHIVE_TABLE_REGEX = /\_#{ARCHIVE_TABLE_SUFFIX}_\d+\z/
 
 
   def self.root
@@ -31,9 +38,9 @@ module TableRotate
   def self.timestamp_from_table_name(table_name)
     timestamp = table_name.split('_').last
     if timestamp.match(/\A\d+\z/)
-      timestamp
+      timestamp.to_i
     else
-      raise "No valid timestamp for #{table_name}. Expected _\d+ at end."
+      raise InvalidTimestampError, "No valid timestamp for #{table_name}. Expected _\d+ at end."
     end
   end
 
@@ -43,13 +50,26 @@ module TableRotate
   end
 
 
+  def self.archive_table_name(base_name, timestamp)
+    "#{base_name}_#{ARCHIVE_TABLE_SUFFIX}_#{timestamp}"
+  end
+
+
+  # Get the archive tables given this base table name.
+  def self.archive_table_names(base_name)
+    TableRotate.
+      show_tables.
+      select{ |t| t.starts_with?(base_name) && t.match(ARCHIVE_TABLE_REGEX) }.
+      sort.reverse
+  end
+
+
   def self.rotate_active_table!(table_name)
-    timestamp = Time.now.to_i
-    archived_table_name = "#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_#{timestamp}"
+    archived_table_name = archive_table_name(table_name, Time.now.to_i)
     tmp_new_table_name = "#{table_name}_tra_new"
 
     if TableRotate.show_tables.include?(archived_table_name)
-      raise "#{archived_table_name} already exists. Aborting rotation of #{table_name} table."
+      raise ArchiveTableAlreadyExistsError, "#{archived_table_name} already exists. Aborting rotation of #{table_name} table."
     else
       puts 'Archiving active table and replacing with new one...' unless in_test?
       TableRotate.sql_exec("CREATE TABLE #{tmp_new_table_name} like #{table_name}")
@@ -59,36 +79,32 @@ module TableRotate
   end
 
 
-  # Get the archive tables given this base table name.
-  def self.archive_table_names(table_name)
-    TableRotate.
-      show_tables.
-      select{|t| t.match(/^#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_\d+$/)}.
-      sort.reverse
-  end
+  def self.prune_archives!(klass)
+    dropped = []
 
-
-  def self.prune_archives(klass)
-  end
-
-
-  # XXX
-  def self.clear_archived_table_before!(table_name, date)
-    archive_table_names(table_name).each do |t|
-      # Dropping tables is dangerous. Bomb if anything doesn't look right.
-      if !t || t == table_name || !t.match(/^#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_\d+$/)
-        raise "Attempted to archive invalid table #{t}!"
-      end
-
-      archived_str = t.match(/^#{table_name}_#{ARCHIVE_TABLE_SUFFIX}_(\d+)$/)[1]
-      archived_at = Date.strptime(archived_str, '%Y%m%d').to_time
-      if date == 'endoftime' || archived_at < date
-        puts "Dropping table #{t}..." unless in_test?
-        TableRotate.sql_exec("DROP TABLE #{t}")
-        ActiveRecord::Base.connection.schema_cache.clear_table_cache!(t)
-        puts 'Done!' unless in_test?
+    loop do
+      # archive tables are ordered by newest first. we want to drop the oldest
+      # first, so we pop off the back.
+      table_names = archive_table_names(klass.table_name)
+      if table_names.count <= klass.max_archive_count
+        break
+      else
+        table = table_names.last
+        if sane_to_drop?(klass, table)
+          TableRotate.sql_exec("DROP TABLE #{table}")
+          ActiveRecord::Base.connection.schema_cache.clear_table_cache!(table)
+        end
+        dropped << table
       end
     end
+
+    dropped
+  end
+
+
+  def self.sane_to_drop?(klass, table_name)
+    table_name.starts_with?(klass.table_name) &&
+      table_name.match(ARCHIVE_TABLE_REGEX)
   end
 
 
@@ -103,8 +119,23 @@ module TableRotate
 
   included do
     def self.archive!
+      unless enough_time_since_last_archive?
+        raise NotEnoughTimeBetweenArchivesError, "There must be at least #{min_time_between_archives} seconds between each archive."
+      end
+
       TableRotate.rotate_active_table!(table_name)
-      # TableRotate.clear_archived_table_before!(table_name, archive_table_ttl_in_days.days.ago)
+      TableRotate.prune_archives!(self)
+    end
+
+
+    def self.enough_time_since_last_archive?
+      if archive = archives(1).first
+        last_archive_timestamp = TableRotate.timestamp_from_table_name(archive.table_name)
+        time_since_last_archive = Time.now.to_i - last_archive_timestamp
+        time_since_last_archive >= min_time_between_archives
+      else
+        true
+      end
     end
 
 
@@ -125,8 +156,16 @@ module TableRotate
     end
 
 
-    def self.archive_table_ttl_in_days
+    # We'll use this to prune old tables
+    def self.max_archive_count
       3
+    end
+
+
+    # In case `prune_archives!` gets run extra-often, this will prevent it from
+    # archiving too frequently.
+    def self.min_time_between_archives
+      1.day
     end
 
 
