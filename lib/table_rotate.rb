@@ -151,7 +151,7 @@ module TableRotate
     end
 
 
-    # We'll use this to prune old tables
+    # We'll use this to prune old tables.
     def self.max_archive_count
       3
     end
@@ -159,8 +159,11 @@ module TableRotate
 
     # In case `prune_archives!` gets run extra-often, this will prevent it from
     # archiving too frequently.
+    #
+    # We subtract 1 minute from the min time by defalut to give some leeway to
+    # daily cron jobs.
     def self.min_time_between_archives
-      1.day
+      1.day - 1.minute
     end
 
 
