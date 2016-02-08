@@ -1,8 +1,11 @@
 # Taken shamelessly from
 # http://exposinggotchas.blogspot.com/2011/02/activerecord-migrations-without-rails.html
 
+$LOAD_PATH.unshift(File.join(File.dirname(__FILE__), 'lib'))
+
 require 'yaml'
 require 'logger'
+require 'table_rotate'
 require 'active_record'
 
 namespace :db do
@@ -77,4 +80,19 @@ namespace :db do
   task :version => :configure_connection do
     puts "Current version: #{ActiveRecord::Migrator.current_version}"
   end
+end
+
+desc 'start an irb console with table_rotate and other deps loaded'
+task :console do
+  require 'irb'
+  require 'irb/completion'
+  require 'active_record'
+
+  ENV['DATABASE_ENV'] ||= 'development'
+
+  config = YAML.load_file("#{TableRotate.root}/config/database.yml")[ENV['DATABASE_ENV']]
+  ActiveRecord::Base.establish_connection(config)
+
+  ARGV.clear
+  IRB.start
 end
