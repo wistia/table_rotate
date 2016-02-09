@@ -14,8 +14,7 @@ end
 
 Then setup a cron job that does this:
 
-    # TODO: This isn't implemented yet!
-    rake table_rotate:archive class=MyModel
+    rake table_rotate:archive[MyModel]
 
 Or if you want to use something in pure ruby, to do it, run this:
 
